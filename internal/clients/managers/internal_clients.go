@@ -1,39 +1,35 @@
-package clients
+package managers
 
 import (
 	"context"
 
+	"github.com/Red-Sock/toolbox/closer"
 	errors "github.com/Red-Sock/trace-errors"
 	"github.com/docker/docker/client"
-	"github.com/godverv/matreshka-be/pkg/matreshka_api"
 	"github.com/sirupsen/logrus"
 
-	"github.com/godverv/Velez/internal/clients/configurator"
+	"github.com/godverv/Velez/internal/clients"
 	"github.com/godverv/Velez/internal/clients/docker"
 	"github.com/godverv/Velez/internal/clients/docker/deploy_manager"
-	grpcClients "github.com/godverv/Velez/internal/clients/grpc"
 	"github.com/godverv/Velez/internal/clients/hardware"
 	"github.com/godverv/Velez/internal/clients/ports"
 	"github.com/godverv/Velez/internal/clients/security"
 	"github.com/godverv/Velez/internal/config"
-	"github.com/godverv/Velez/internal/utils/closer"
 )
 
-type clients struct {
-	docker    *docker.Docker
-	matreshka matreshka_api.MatreshkaBeAPIClient
+type internalClients struct {
+	docker *docker.Docker
 
-	portManager     PortManager
-	hardwareManager HardwareManager
-	securityManager security.Manager
+	portManager     clients.PortManager
+	hardwareManager clients.HardwareManager
 
-	configurator  Configurator
-	deployManager DeployManager
+	deployManager   clients.DeployManager
+	securityManager clients.SecurityManager
 }
 
-func New(ctx context.Context, cfg config.Config) (Clients, error) {
+func NewInternalClients(ctx context.Context, cfg config.Config) (clients.InternalClients, error) {
 	var err error
-	cls := &clients{}
+	cls := &internalClients{}
 
 	// Docker engine
 	{
@@ -43,14 +39,6 @@ func New(ctx context.Context, cfg config.Config) (Clients, error) {
 			return nil, errors.Wrap(err, "error getting docker api client")
 		}
 		closer.Add(cls.docker.Close)
-	}
-	// Matreshka
-	{
-		logrus.Debug("Initializing matreshka client")
-		cls.matreshka, err = grpcClients.NewMatreshkaBeAPIClient(ctx, cfg)
-		if err != nil {
-			logrus.Fatalf("error getting matreshka api: %s", err)
-		}
 	}
 
 	// Security access layer
@@ -81,12 +69,6 @@ func New(ctx context.Context, cfg config.Config) (Clients, error) {
 		}
 	}
 
-	// Configurator
-	{
-		logrus.Debug("Initializing configuration manager")
-		cls.configurator = configurator.New(cls.matreshka, cls.docker)
-	}
-
 	// Hardware
 	{
 		logrus.Debug("Initializing hardware manager")
@@ -98,33 +80,30 @@ func New(ctx context.Context, cfg config.Config) (Clients, error) {
 		logrus.Debug("Initializing deployment manager")
 		cls.deployManager = deploy_manager.New(cls.docker)
 	}
+
 	return cls, nil
 }
 
-func (c *clients) DockerAPI() client.CommonAPIClient {
+func (c *internalClients) DockerAPI() client.CommonAPIClient {
 	return c.docker
 }
 
-func (c *clients) Docker() Docker {
+func (c *internalClients) Docker() clients.Docker {
 	return c.docker
 }
 
-func (c *clients) Configurator() Configurator {
-	return c.configurator
-}
-
-func (c *clients) DeployManager() DeployManager {
+func (c *internalClients) DeployManager() clients.DeployManager {
 	return c.deployManager
 }
 
-func (c *clients) PortManager() PortManager {
+func (c *internalClients) PortManager() clients.PortManager {
 	return c.portManager
 }
 
-func (c *clients) HardwareManager() HardwareManager {
+func (c *internalClients) HardwareManager() clients.HardwareManager {
 	return c.hardwareManager
 }
 
-func (c *clients) SecurityManager() security.Manager {
+func (c *internalClients) SecurityManager() clients.SecurityManager {
 	return c.securityManager
 }

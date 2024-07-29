@@ -1,52 +1,44 @@
 package app
 
 import (
-	"strconv"
-
+	"github.com/Red-Sock/toolbox/keep_alive"
 	"github.com/sirupsen/logrus"
 
 	"github.com/godverv/Velez/internal/backservice/configuration"
 	"github.com/godverv/Velez/internal/backservice/env"
-	"github.com/godverv/Velez/internal/cron"
+	"github.com/godverv/Velez/internal/backservice/service_discovery_task"
+	"github.com/godverv/Velez/internal/clients/grpc"
 )
 
 func (a *App) MustInitEnvironment() {
-	err := env.StartNetwork(a.Clients.Docker())
+	err := env.StartNetwork(a.InternalClients.Docker())
 	if err != nil {
 		logrus.Fatalf("error creating network: %s", err)
 	}
 
-	err = env.StartVolumes(a.Clients.Docker())
+	err = env.StartVolumes(a.InternalClients.Docker())
 	if err != nil {
 		logrus.Fatalf("error creating volumes %s", err)
 	}
 
-	if !a.Cfg.GetEnvironment().NodeMode {
-		return
-	}
+	envVars := a.Cfg.GetEnvironment()
 
-	var portToExposeTo string
-	if a.Cfg.GetEnvironment().ExposeMatreshkaPort {
-		p := uint64(a.Cfg.GetEnvironment().MatreshkaPort)
-
-		if p == 0 {
-			portFromPool, err := a.Clients.PortManager().GetPort()
-			if err != nil {
-				logrus.Fatalf("no available port for config to expose")
-				return
-			}
-
-			p = uint64(portFromPool)
+	if envVars.NodeMode {
+		matreshkaTask, err := configuration.New(a.Cfg, a.InternalClients)
+		if err != nil {
+			logrus.Fatalf("error creating configuration background task %s", err)
 		}
+		go keep_alive.KeepAlive(matreshkaTask, keep_alive.WithCancel(a.Ctx.Done()))
 
-		portToExposeTo = strconv.FormatUint(p, 10)
+		makoshBackgroundTask, err := service_discovery_task.New(a.Cfg, a.InternalClients)
+		if err != nil {
+			logrus.Fatalf("error creating service discovery background task: %s", err)
+		}
+		go keep_alive.KeepAlive(makoshBackgroundTask, keep_alive.WithCancel(a.Ctx.Done()))
 	}
 
-	conf := configuration.New(a.Clients.Docker(), portToExposeTo)
-	err = conf.Start()
+	err = grpc.RegisterServiceDiscovery(a.Cfg)
 	if err != nil {
-		logrus.Fatalf("error launching config backservice: %s", err)
+		logrus.Fatalf("error initializing service discovery %s", err)
 	}
-
-	go cron.KeepAlive(a.Ctx, conf)
 }
